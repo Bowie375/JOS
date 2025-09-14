@@ -107,6 +107,7 @@ getvgaattr(const char *fmt)
 			val = val * 10 + ch - '0';
 			cnt += 1;
 			if (cnt > 3) {
+				vgaattr = 0;
 				return -1;
 			}
 			continue;
@@ -139,6 +140,7 @@ getvgaattr(const char *fmt)
 			return length;
 
 		default:
+			vgaattr = 0;
 			return -1;
 		}
 	}

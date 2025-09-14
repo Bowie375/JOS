@@ -74,3 +74,26 @@
 5. x=3, y=xxxx
 
 6. make fmt argument comes at last, so that it will still be possible to locate the va-list based on the address of named argument: fmt.
+
+
+### The Stack
+1. Excercise 9: Determine where the kernel initializes its stack, and exactly where in memory its stack is located. How does the kernel reserve space for its stack? And at which "end" of this reserved area is the stack pointer initialized to point to?
+    In entry.S, the kernel sets up stack in .data section: 
+
+        .data
+        	.p2align	PGSHIFT		# force page alignment
+        	.globl		bootstack
+        bootstack:
+        	.space		KSTKSIZE
+        	.globl		bootstacktop   
+        bootstacktop:
+
+    after linkage, the kernel is at 0xf0118000, which can be infered from the asm code:
+    
+    	movl	$(bootstacktop),%esp
+        f0100034:	bc 00 80 11 f0       	mov    $0xf0118000,%esp
+
+    The stack should actually be loaded at 0x110000 in physical memory and spans from 0x110000 to 0x117FFF, taking up 8 PGSIZE. The stack pointer is initialized to 0x118000.
+
+2. Excercise 10:
+    - 28 bytes are pushed to the stack: %ebp, %ebx, reserve 20 bytes for local variable and parameters to the nested test_backtrace function
