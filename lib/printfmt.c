@@ -28,6 +28,8 @@ static const char * const error_string[MAXERROR] =
 	[E_FAULT]	= "segmentation fault",
 };
 
+void vputch(int ch, void *cookie, void (*putch)(int, void*)); 
+
 /*
  * Print a number (base <= 16) in reverse order,
  * using specified putch function and associated pointer putdat.
@@ -42,11 +44,11 @@ printnum(void (*putch)(int, void*), void *putdat,
 	} else {
 		// print any needed pad characters before first digit
 		while (--width > 0)
-			putch(padc, putdat);
+			vputch(padc, putdat, putch);
 	}
 
 	// then print this (the least significant) digit
-	putch("0123456789abcdef"[num % base], putdat);
+	vputch("0123456789abcdef"[num % base], putdat, putch);
 }
 
 // Get an unsigned int of various possible sizes from a varargs list,
@@ -75,9 +77,84 @@ getint(va_list *ap, int lflag)
 		return va_arg(*ap, int);
 }
 
+// Get VGA text attribute format from ANSI escape sequence
+static int vgaattr = 0;
+
+static int
+getvgaattr(const char *fmt)
+{
+	int ch=0, cnt=0, val=0, length=0;
+
+	if((ch = *(unsigned char *) fmt++) != '['){
+		return -1;
+	}
+	
+	length += 1;
+	while(1) {
+		switch (ch = *(unsigned char *) fmt++) {
+		
+		case '0':
+		case '1':
+		case '2':
+		case '3':
+		case '4':
+		case '5':
+		case '6':
+		case '7':
+		case '8':
+		case '9':
+			length += 1;
+			val = val * 10 + ch - '0';
+			cnt += 1;
+			if (cnt > 3) {
+				vgaattr = 0;
+				return -1;
+			}
+			continue;
+
+		case ';': 	// multiple attributes
+		case 'm':	// end of ANSI sequence
+			length += 1;
+			if (val == 0) {
+				vgaattr = 0;
+			} else if (val == 1) {
+				vgaattr |= 0x8;
+			} else if (val >= 30 && val <= 37) {
+				vgaattr |= ("04261537"[val - 30] - '0');
+			} else if (val >= 90 && val <= 97) {
+				vgaattr |= 0x8;
+				vgaattr |= ("04261537"[val - 90] - '0');
+			} else if (val >= 40 && val <= 47) {
+				vgaattr |= ("04261537"[val - 40] - '0') << 4;
+			} else if (val >= 100 && val <= 107) {
+				vgaattr |= 0x80;
+				vgaattr |= ("04261537"[val - 100] - '0') << 4;
+			} 
+
+			if (ch == ';') {
+				cnt = 0;
+				val = 0;
+				continue;
+			}
+
+			return length;
+
+		default:
+			vgaattr = 0;
+			return -1;
+		}
+	}
+}
 
 // Main function to format and print a string.
 void printfmt(void (*putch)(int, void*), void *putdat, const char *fmt, ...);
+
+void
+vputch(int ch, void *cookie, void (*putch)(int, void*)) 
+{
+	ch = ch | (vgaattr << 8);
+	putch(ch, cookie);
+}
 
 void
 vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
@@ -85,14 +162,25 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 	register const char *p;
 	register int ch, err;
 	unsigned long long num;
-	int base, lflag, width, precision, altflag;
+	int base, lflag, width, precision, altflag, ansilen;
 	char padc;
 
 	while (1) {
 		while ((ch = *(unsigned char *) fmt++) != '%') {
 			if (ch == '\0')
 				return;
-			putch(ch, putdat);
+			else if (ch == '\033')
+			{
+				ansilen = getvgaattr(fmt);
+				if (ansilen < 0) { // unvalid ANSI escape sequence
+					vputch(ch, putdat, putch);
+					continue;
+				}
+				fmt += ansilen;
+				continue;
+			}
+			
+			vputch(ch, putdat, putch);
 		}
 
 		// Process a %-escape sequence
@@ -157,7 +245,7 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 
 		// character
 		case 'c':
-			putch(va_arg(ap, int), putdat);
+			vputch(va_arg(ap, int), putdat, putch);
 			break;
 
 		// error message
@@ -177,21 +265,21 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 				p = "(null)";
 			if (width > 0 && padc != '-')
 				for (width -= strnlen(p, precision); width > 0; width--)
-					putch(padc, putdat);
+					vputch(padc, putdat, putch);
 			for (; (ch = *p++) != '\0' && (precision < 0 || --precision >= 0); width--)
 				if (altflag && (ch < ' ' || ch > '~'))
-					putch('?', putdat);
+					vputch('?', putdat, putch);
 				else
-					putch(ch, putdat);
+					vputch(ch, putdat, putch);
 			for (; width > 0; width--)
-				putch(' ', putdat);
+				vputch(' ', putdat, putch);
 			break;
 
 		// (signed) decimal
 		case 'd':
 			num = getint(&ap, lflag);
 			if ((long long) num < 0) {
-				putch('-', putdat);
+				vputch('-', putdat, putch);
 				num = -(long long) num;
 			}
 			base = 10;
@@ -205,16 +293,14 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 
 		// (unsigned) octal
 		case 'o':
-			// Replace this with your code.
-			putch('X', putdat);
-			putch('X', putdat);
-			putch('X', putdat);
-			break;
+			num = getuint(&ap, lflag);
+			base = 8;
+			goto number;
 
 		// pointer
 		case 'p':
-			putch('0', putdat);
-			putch('x', putdat);
+			vputch('0', putdat, putch);
+			vputch('x', putdat, putch);
 			num = (unsigned long long)
 				(uintptr_t) va_arg(ap, void *);
 			base = 16;
@@ -230,12 +316,12 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 
 		// escaped '%' character
 		case '%':
-			putch(ch, putdat);
+			vputch(ch, putdat, putch);
 			break;
 
 		// unrecognized escape sequence - just print it literally
 		default:
-			putch('%', putdat);
+			vputch('%', putdat, putch);
 			for (fmt--; fmt[-1] != '%'; fmt--)
 				/* do nothing */;
 			break;
