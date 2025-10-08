@@ -212,7 +212,6 @@ mem_init(void)
 	// Permissions: kernel RW, user NONE
 	// Your code goes here:
 
-	cprintf("=== %d, %d, %x ===\n", ROUNDUP(-KERNBASE, PGSIZE)/PGSIZE, PDX(KERNBASE));
 	boot_map_region(kern_pgdir, KERNBASE, -KERNBASE, 0, PTE_W | PTE_P);
 
 	// Check that the initial page directory has been set up correctly.

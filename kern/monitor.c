@@ -10,6 +10,7 @@
 #include <kern/console.h>
 #include <kern/monitor.h>
 #include <kern/kdebug.h>
+#include <kern/pmap.h>
 
 #define CMDBUF_SIZE	80	// enough for one VGA text line
 
@@ -25,6 +26,9 @@ static struct Command commands[] = {
 	{ "help", "Display this list of commands", mon_help },
 	{ "kerninfo", "Display information about the kernel", mon_kerninfo },
 	{ "backtrace", "Track back all functions before this one", mon_backtrace },
+	{ "showmappings", "Show virtual memory mappings", mon_showmappings },
+	{ "setperm", "Set the permission of a virtual page", mon_setperm },
+	{ "dumpmem", "Dump physical memory to console", mon_dumpmem }
 };
 
 /***** Implementations of basic kernel monitor commands *****/
@@ -91,7 +95,105 @@ mon_backtrace(int argc, char **argv, struct Trapframe *tf)
 	return 0;
 }
 
+int
+mon_showmappings(int argc, char **argv, struct Trapframe *tf)
+{
+	uintptr_t va_start, va_end, va;
+	pte_t *pte;
+	struct PageInfo *pp;
+	int pde_flags, pte_flags;
 
+	if (argc != 3) {
+		cprintf("Usage: showmappings <va_start> <va_end>\n");
+		return 0;
+	}
+
+	va_start = ROUNDDOWN(strtol(argv[1], NULL, 0), PGSIZE);
+	va_end = ROUNDUP(strtol(argv[2], NULL, 0), PGSIZE);
+
+	cprintf("\033[33;44mVirtual memory mappings:\033[0m\n");
+	cprintf("  VA start    VA end       PD      PDX      PT      PTX     PA     PDE flags  PTE flags\n");
+	for (va = va_start; va < va_end; va += PGSIZE) {
+		pte = pgdir_walk(kern_pgdir, (void*)va, 0);
+		if (!pte) {
+			cprintf("  %08x - %08x: not mapped\n", va, va + PGSIZE);
+			continue;
+		}
+		pp = pa2page(PTE_ADDR(*pte));
+		pde_flags = kern_pgdir[PDX(va)];
+		pte_flags = *pte;
+		cprintf("  %08x - %08x:  %08x   %03x   %08x   %03x  %08x     %c%c%c        %c%c%c\n",
+			va, va + PGSIZE, kern_pgdir, PDX(va), PTE_ADDR(pde_flags), PTX(va), PTE_ADDR(*pte),
+			pde_flags & 1 ? 'p' : '-', pde_flags & 2 ? 'w' : '-', pde_flags & 4 ? 'u' : '-',
+			pte_flags & 1 ? 'p' : '-', pte_flags & 2 ? 'w' : '-', pte_flags & 4 ? 'u' : '-');
+	}
+
+	return 0;
+}
+
+int 
+mon_setperm(int argc, char **argv, struct Trapframe *tf)
+{
+	uintptr_t va;
+	uint32_t perm;
+	pte_t *pte;
+
+	if (argc != 3) {
+		cprintf("Usage: setperm <va> <perm: [0, 7]>\n");
+		return 0;
+	}
+
+	va = ROUNDDOWN(strtol(argv[1], NULL, 0), PGSIZE);
+	perm = strtol(argv[2], NULL, 0) & 0x7;
+
+	pte = pgdir_walk(kern_pgdir, (void*)va, 1);
+	if (!pte) {
+		cprintf("Failed to map virtual address %08x\n", va);
+		return 0;
+	}
+	*pte = PTE_ADDR(*pte) | perm;
+	cprintf("Set permission of virtual page %08x to %c%c%c\n", 
+		va, perm & 1 ? 'p' : '-', perm & 2 ? 'w' : '-', perm & 4 ? 'u' : '-');
+
+	return 0;
+}
+
+int
+mon_dumpmem(int argc, char **argv, struct Trapframe *tf)
+{
+	uint32_t start, end;
+
+	if (argc != 4) {
+		cprintf("Usage: dumpmem <mode: ['v' | 'p']> <start> <end>\n");
+		return 0;
+	}
+
+	start = strtol(argv[2], NULL, 0);
+	end = strtol(argv[3], NULL, 0);
+
+	if (strcmp(argv[1], "p") == 0) {
+		start = (uintptr_t)KADDR(start);
+		end = (uintptr_t)KADDR(end);
+	}
+	for (uint32_t i = start; i < end; i += 16) {
+		cprintf("%08x: ", i);
+		for (uint32_t j = 0; j < 16; j+=4) {
+			if (i + j >= end) {
+				cprintf("\n");
+				break;
+			}
+
+			cprintf(
+				"%02x %02x %02x %02x", 
+				*(unsigned char*)(i + j), *(unsigned char*)(i + j + 1), 
+				*(unsigned char*)(i + j + 2), *(unsigned char*)(i + j + 3)
+			);
+			cprintf("%s", (j == 12) ? "\n" : " / ");
+		}
+	}
+
+	return 0;
+}
 
 /***** Kernel monitor command interpreter *****/
 

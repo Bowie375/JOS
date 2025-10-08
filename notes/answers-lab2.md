@@ -45,3 +45,51 @@
 		```
 
 		this is possible because the entry_pagedir maps [0, 4MB), and [KERNBASE, KERNBASE+4MB) to the same physical page. So when we enable paging, we can access the kernel code at both low address and high kernel address.
+
+
+#### Challenges
+I finished the second challenge in lab2.
+
+1. Challenge 2: Extend the JOS kernel monitor with commands to:
+	- Display in a useful and easy-to-read format all of the physical page mappings (or lack thereof) that apply to a particular range of virtual/linear addresses in the currently active address space. For example, you might enter 'showmappings 0x3000 0x5000' to display the physical page mappings and corresponding permission bits that apply to the pages at virtual addresses 0x3000, 0x4000, and 0x5000.
+
+		- For every page in the given address range, I utilize `page_walk` to get the page table entry, and display relative informations such as PD, PDX, PT, PTX, PA and permission bits, exmaple output:
+
+			```
+			K> showmappings 0xf0100fec 0xf0101007
+			Virtual memory mappings:
+			  VA start    VA end       PD      PDX      PT      PTX     PA     PDE flags  PTE flags
+			  f0100000 - f0101000:  f0121000   3c0   003ff000   100  00100000     pwu        pw-
+			  f0101000 - f0102000:  f0121000   3c0   003ff000   101  00101000     pwu        pw-
+			```
+
+	- Explicitly set, clear, or change the permissions of any mapping in the current address space.
+
+		- I utilize `page_walk` to get the page table entry, and then set or clear the permission bits by directly modify the last few bits of the entry. Example output:
+
+			```
+			K> showmappings 0xf0100fec 0xf0101007
+			Virtual memory mappings:
+			  VA start    VA end       PD      PDX      PT      PTX     PA     PDE flags  PTE flags
+			  f0100000 - f0101000:  f0121000   3c0   003ff000   100  00100000     pwu        pw-
+			  f0101000 - f0102000:  f0121000   3c0   003ff000   101  00101000     pwu        pw-
+			
+			K> setperm 0xf0100fec 4
+			Set permission of virtual page f0100000 to --u
+			
+			K> showmappings 0xf0100fec 0xf0101007
+			Virtual memory mappings:
+			  VA start    VA end       PD      PDX      PT      PTX     PA     PDE flags  PTE flags
+			  f0100000 - f0101000:  f0121000   3c0   003ff000   100  00100000     pwu        --u
+			  f0101000 - f0102000:  f0121000   3c0   003ff000   101  00101000     pwu        pw-
+			```
+
+	- Dump the contents of a range of memory given either a virtual or physical address range. Be sure the dump code behaves correctly when the range extends across page boundaries!
+
+		- For physical address range, I first use `PADDR` to convert it to a virtual address, then I dereference the address range byte by byte using `*(char *)va`. In this way, address range across page boundaries can be correcly handled. For virtual address range, I simply dereference the address range byte by byte using `*(char *)va`. Example output:
+
+			```
+			K> dumpmem v 0xf0100000 0xf0100013
+			f0100000: 02 b0 ad 1b / 00 00 00 00 / fe 4f 52 e4 / 66 c7 05 72
+			f0100010: 04 00 00 34 /
+			```
