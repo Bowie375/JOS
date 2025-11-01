@@ -292,14 +292,25 @@ region_alloc(struct Env *e, void *va, size_t len)
 		end_va_page = (uintptr_t)0xffffffff;
 
 	// Allocate and map each page in the region
+	pte_t *pte;
 	struct PageInfo *pg;
+	physaddr_t pa;
 	for (uintptr_t va_cur = va_page; va_cur < end_va_page; va_cur += PGSIZE) {
-		pg = page_alloc(0);
-		if (!pg)
-			panic("region_alloc: page_alloc failed");
+		pte = pgdir_walk(e->env_pgdir, (void*)va_cur, 1);
+		if (!pte) {
+			panic("region_alloc: out of memory");
+		}
 
-		if (page_insert(e->env_pgdir, pg, (void*)va_cur, PTE_P | PTE_U | PTE_W) < 0)
-			panic("region_alloc: page_insert failed");
+		if (*pte) {
+			panic("region_alloc: page already mapped");
+			// continue
+		}
+
+		// Allocate a page and map it at the current virtual address
+		if (!(pg = page_alloc(0)))
+			panic("region_alloc: out of memory");
+		pa = page2pa(pg);
+		*pte = pa | PTE_P | PTE_U | PTE_W;
 	}
 }
 
@@ -363,17 +374,16 @@ load_icode(struct Env *e, uint8_t *binary)
 	uint8_t *file_end = file_start + elf->e_phnum * sizeof(struct Proghdr);
 	for (ph = (struct Proghdr*) file_start; ph < (struct Proghdr*) file_end; ph++) {
 		if (ph->p_type != ELF_PROG_LOAD)
-		continue;
-		
+			continue;
+
 		// Allocate and map the segment's pages
 		region_alloc(e, (void*) ph->p_va, ph->p_memsz);
-		
-		lcr3(PADDR(e->env_pgdir));
+
 		// Copy the segment's data from the ELF file to virtual memory
 		memcpy((void*) ph->p_va, binary + ph->p_offset, ph->p_filesz);
+	
 		// Clear any remaining memory bytes to zero
 		memset((void*) (ph->p_va + ph->p_filesz), 0, ph->p_memsz - ph->p_filesz);
-		lcr3(PADDR(kern_pgdir));
 	}
 
 	// Now map one page for the program's initial stack
