@@ -357,6 +357,8 @@ load_icode(struct Env *e, uint8_t *binary)
 	//  What?  (See env_run() and env_pop_tf() below.)
 
 	// LAB 3: Your code here.
+	lcr3(PADDR(e->env_pgdir));
+
 	struct Elf *elf = (struct Elf*) binary;
 	struct Proghdr *ph;
 	uint8_t *file_start = binary + elf->e_phoff;
@@ -368,22 +370,22 @@ load_icode(struct Env *e, uint8_t *binary)
 		// Allocate and map the segment's pages
 		region_alloc(e, (void*) ph->p_va, ph->p_memsz);
 		
-		lcr3(PADDR(e->env_pgdir));
 		// Copy the segment's data from the ELF file to virtual memory
 		memcpy((void*) ph->p_va, binary + ph->p_offset, ph->p_filesz);
 		// Clear any remaining memory bytes to zero
 		memset((void*) (ph->p_va + ph->p_filesz), 0, ph->p_memsz - ph->p_filesz);
-		lcr3(PADDR(kern_pgdir));
 	}
-
+	
 	// Now map one page for the program's initial stack
 	// at virtual address USTACKTOP - PGSIZE.
-
+	
 	// LAB 3: Your code here.
 	region_alloc(e, (void*) (USTACKTOP - PGSIZE), PGSIZE);
-
+	
 	// Set the entry point for the environment
 	e->env_tf.tf_eip = elf->e_entry;
+	
+	lcr3(PADDR(kern_pgdir));
 }
 
 //
@@ -486,9 +488,9 @@ env_pop_tf(struct Trapframe *tf)
 {
 	asm volatile(
 		"\tmovl %0,%%esp\n"
-		"\tpopal\n"
 		"\tpopl %%es\n"
 		"\tpopl %%ds\n"
+		"\tpopal\n"
 		"\taddl $0x8,%%esp\n" /* skip tf_trapno and tf_errcode */
 		"\tiret\n"
 		: : "g" (tf) : "memory");

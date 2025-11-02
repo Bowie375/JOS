@@ -18,3 +18,4 @@
 /.suf
 .vscode/
 tmp/
+__pycache__/
