@@ -221,6 +221,7 @@ mem_init(void)
 
 	boot_map_region(kern_pgdir, KSTACKTOP-KSTKSIZE, KSTKSIZE, PADDR(bootstack), PTE_W | PTE_P);
 	//boot_map_region(kern_pgdir, KSTACKTOP-PTSIZE, PTSIZE-KSTKSIZE, PADDR(bootstack) + KSTKSIZE, PTE_W | PTE_P);
+	mem_init_mp();
 
 	//////////////////////////////////////////////////////////////////////
 	// Map all of physical memory at KERNBASE.
@@ -231,7 +232,6 @@ mem_init(void)
 	// Permissions: kernel RW, user NONE
 	// Your code goes here:
 	boot_map_region(kern_pgdir, KERNBASE, -KERNBASE, 0, PTE_W | PTE_P);
-	mem_init_mp();
 
 	// Check that the initial page directory has been set up correctly.
 	check_kern_pgdir();
@@ -281,6 +281,13 @@ mem_init_mp(void)
 	//
 	// LAB 4: Your code here:
 
+	uintptr_t stacktop = 0;
+
+	for (int i = 0; i < NCPU; i++) {
+		stacktop = KSTACKTOP - i * (KSTKSIZE + KSTKGAP);
+		boot_map_region(kern_pgdir, stacktop - KSTKSIZE, KSTKSIZE, PADDR(percpu_kstacks[i]), PTE_W | PTE_P);
+	}
+
 }
 
 // --------------------------------------------------------------
@@ -329,6 +336,13 @@ page_init(void)
 
 	// 2) Mark the rest of base memory as free.
 	for (i = 1; i < npages_basemem; i++) {
+		if (i == MPENTRY_PADDR / PGSIZE) {
+			// Mark the MP entry page as in use.
+			pages[i].pp_ref = 1;
+			pages[i].pp_link = NULL;
+			continue;
+		}
+
 		pages[i].pp_ref = 0;
 		pages[i].pp_link = page_free_list;
 		page_free_list = &pages[i];
@@ -666,8 +680,18 @@ mmio_map_region(physaddr_t pa, size_t size)
 	// Hint: The staff solution uses boot_map_region.
 	//
 	// Your code here:
-	panic("mmio_map_region not implemented");
+	
+	uintptr_t end = ROUNDUP(base + size, PGSIZE), old_base = base;
+	if (end > MMIOLIM)
+		panic("mmio_map_region: overflow");
+
+	boot_map_region(kern_pgdir, base, end - base, pa, PTE_PCD | PTE_PWT | PTE_W);
+
+	// Return the base of the reserved region.
+	base = end;
+	return (void *) old_base;
 }
+
 
 static uintptr_t user_mem_check_addr;
 

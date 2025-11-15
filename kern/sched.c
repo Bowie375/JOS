@@ -30,6 +30,26 @@ sched_yield(void)
 
 	// LAB 4: Your code here.
 
+	if (curenv) {
+		idle = curenv->env_link;
+	} else {
+		idle = envs;
+	}
+
+	for (int i = 0; i < NENV; i++) {
+		if (idle->env_status == ENV_RUNNABLE) {
+			env_run(idle);
+			return;
+		}
+		idle = idle->env_link;
+	}
+
+	// No runnable environments found.
+	if (curenv->env_status == ENV_RUNNING) {
+		env_run(curenv);
+		return;
+	}
+
 	// sched_halt never returns
 	sched_halt();
 }
