@@ -72,6 +72,19 @@ trap_init(void)
 	extern struct Segdesc gdt[];
 
 	// LAB 3: Your code here.
+	extern uint32_t idt_handlers[];
+	extern uint32_t idt_handlers_end[];
+
+	uint32_t *entry = idt_handlers, trapno, dpl;
+	void (*handler)();
+
+	while (entry < idt_handlers_end) {
+		trapno = entry[0];
+		handler = (void (*)()) entry[1];
+		dpl = entry[2];
+		SETGATE(idt[trapno], 0, GD_KT, handler, dpl);
+		entry += 4;
+	}
 
 	// Per-CPU setup 
 	trap_init_percpu();
@@ -176,6 +189,50 @@ trap_dispatch(struct Trapframe *tf)
 {
 	// Handle processor exceptions.
 	// LAB 3: Your code here.
+	switch (tf->tf_trapno) {
+	case T_DIVIDE:
+	case T_DEBUG:
+	case T_NMI:
+	case T_OFLOW:
+	case T_BOUND:
+	case T_ILLOP:
+	case T_DEVICE:
+	case T_DBLFLT:
+	case T_TSS:
+	case T_SEGNP:
+	case T_STACK:
+	case T_GPFLT:
+	case T_FPERR:
+	case T_ALIGN:
+	case T_MCHK:
+	case T_SIMDERR:
+		//env_free(curenv);
+		print_trapframe(tf);
+		env_destroy(curenv);
+		return;
+	case T_PGFLT:
+		page_fault_handler(tf);
+		return;
+	case T_BRKPT:
+		print_trapframe(tf);
+		while (1)
+			monitor(NULL);
+	case T_SYSCALL:
+		tf->tf_regs.reg_eax = syscall(
+			tf->tf_regs.reg_eax, 
+			tf->tf_regs.reg_edx, 
+			tf->tf_regs.reg_ecx, 
+			tf->tf_regs.reg_ebx, 
+			tf->tf_regs.reg_edi, 
+			tf->tf_regs.reg_esi
+		);
+		if (tf->tf_regs.reg_eax < 0)
+			env_destroy(curenv);
+		return;
+	default:
+		cprintf("Unknown trap %d\n", tf->tf_trapno);
+		break;
+	}
 
 	// Handle spurious interrupts
 	// The hardware sometimes raises these because of noise on the
@@ -269,6 +326,11 @@ page_fault_handler(struct Trapframe *tf)
 	fault_va = rcr2();
 
 	// Handle kernel-mode page faults.
+	if ((tf->tf_cs & 3) == 0) {
+		// Kernel has no memory management, so we can't handle this.
+		panic("kernel page fault");
+		return;
+	}
 
 	// LAB 3: Your code here.
 
