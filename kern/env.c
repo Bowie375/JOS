@@ -488,9 +488,9 @@ env_pop_tf(struct Trapframe *tf)
 {
 	asm volatile(
 		"\tmovl %0,%%esp\n"
+		"\tpopal\n"
 		"\tpopl %%es\n"
 		"\tpopl %%ds\n"
-		"\tpopal\n"
 		"\taddl $0x8,%%esp\n" /* skip tf_trapno and tf_errcode */
 		"\tiret\n"
 		: : "g" (tf) : "memory");

@@ -86,14 +86,17 @@ idt_handlers_end:
 .text
 .globl _alltraps
 _alltraps:
+	# Save es and ds registers
+	pushl %ds
+	pushl %es
+
+    # movw %ds, %ax
+    # pushl %eax
+    # movw %es, %ax
+    # pushl %eax
+
 	# Save registers
 	pushal
-
-	# Save es and ds registers
-    movw %ds, %ax
-    pushl %eax
-    movw %es, %ax
-    pushl %eax
 
 	# Set kernel data segment
 	movw $GD_KD, %ax
