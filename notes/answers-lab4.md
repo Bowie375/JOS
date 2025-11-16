@@ -8,3 +8,10 @@ Q2: It seems that using the big kernel lock guarantees that only one CPU can run
 
 - Because interrupts, faults, and exceptions can occur asynchronously on any CPU—even when that CPU is not holding the big kernel lock. When an interrupt/trap occurs, the CPU immediately pushes register state onto its own kernel stack, before any locking happens. If multiple CPUs shared one kernel stack, their trap frames would overwrite each other, corrupting execution and crashing the system.
 
+Q3: In your implementation of env_run() you should have called lcr3(). Before and after the call to lcr3(), your code makes references (at least it should) to the variable e, the argument to env_run. Upon loading the %cr3 register, the addressing context used by the MMU is instantly changed. But a virtual address (namely e) has meaning relative to a given address context--the address context specifies the physical address to which the virtual address maps. Why can the pointer e be dereferenced both before and after the addressing switch?
+
+- Because the `e` is in the kernel or at virtual address `0xf-------`. This address space is mapped to the same region both for kernel and user address space. So addressing switch does not affect the manipulation of `e`.
+
+Q4: Whenever the kernel switches from one environment to another, it must ensure the old environment's registers are saved so they can be restored properly later. Why? Where does this happen?
+
+- Because registers reflects the running state of the CPU, so they need to be saved on order to be restored latter. The registers will be saved in `trapentry.S` and restored in `env_pop_tf()`

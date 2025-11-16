@@ -88,7 +88,18 @@ sys_exofork(void)
 	// will appear to return 0.
 
 	// LAB 4: Your code here.
-	panic("sys_exofork not implemented");
+	
+	int errnum = 0;
+	struct Env *e;
+
+	errnum = env_alloc(&e, curenv->env_id);
+	if (errnum < 0)
+		return errnum;
+
+	e->env_status = ENV_NOT_RUNNABLE;
+	e->env_tf = curenv->env_tf;
+	e->env_tf.tf_regs.reg_eax = 0;
+	return e->env_id;
 }
 
 // Set envid's env_status to status, which must be ENV_RUNNABLE
@@ -108,7 +119,19 @@ sys_env_set_status(envid_t envid, int status)
 	// envid's status.
 
 	// LAB 4: Your code here.
-	panic("sys_env_set_status not implemented");
+
+	int errnum = 0;
+	struct Env *e;
+
+	errnum = envid2env(envid, &e, 1);
+	if (errnum < 0)
+		return errnum;
+
+	if (status != ENV_RUNNABLE && status != ENV_NOT_RUNNABLE)
+		return -E_INVAL;
+
+	e->env_status = status;
+	return 0;
 }
 
 // Set the page fault upcall for 'envid' by modifying the corresponding struct
@@ -123,7 +146,16 @@ static int
 sys_env_set_pgfault_upcall(envid_t envid, void *func)
 {
 	// LAB 4: Your code here.
-	panic("sys_env_set_pgfault_upcall not implemented");
+	
+	int errnum = 0;
+	struct Env *e;
+
+	errnum = envid2env(envid, &e, 1);
+	if (errnum < 0)
+		return errnum;
+
+	e->env_pgfault_upcall = func;
+	return 0;
 }
 
 // Allocate a page of memory and map it at 'va' with permission
@@ -153,7 +185,35 @@ sys_page_alloc(envid_t envid, void *va, int perm)
 	//   allocated!
 
 	// LAB 4: Your code here.
-	panic("sys_page_alloc not implemented");
+
+	int errnum = 0;
+	struct Env *e;
+	struct PageInfo *pp;
+
+	errnum = envid2env(envid, &e, 1);
+	if (errnum < 0)
+		return errnum;
+
+	if ((uintptr_t)va >= UTOP || (ROUNDDOWN(va, PGSIZE) != va))
+		return -E_INVAL;
+
+	if ((perm & ~PTE_SYSCALL) || !(perm & PTE_U) || !(perm & PTE_P))
+		return -E_INVAL;
+
+	pp = page_alloc(ALLOC_ZERO);
+	if (pp == NULL)
+		return -E_NO_MEM;
+
+	errnum = page_insert(e->env_pgdir, pp, va, perm);
+	if (errnum < 0) {
+		page_free(pp);
+		return errnum;
+	}
+
+	pte_t *pte;
+	pp = page_lookup(e->env_pgdir, va, &pte);
+
+	return 0;
 }
 
 // Map the page of memory at 'srcva' in srcenvid's address space
@@ -184,7 +244,41 @@ sys_page_map(envid_t srcenvid, void *srcva,
 	//   check the current permissions on the page.
 
 	// LAB 4: Your code here.
-	panic("sys_page_map not implemented");
+
+	int errnum = 0;
+	struct Env *srcenv, *dstenv;
+	struct PageInfo *pp;
+	pte_t *pte;
+
+	errnum = envid2env(srcenvid, &srcenv, 1);
+	if (errnum < 0)
+		return errnum;
+
+	errnum = envid2env(dstenvid, &dstenv, 1);
+	if (errnum < 0)
+		return errnum;
+
+	if ((uintptr_t)srcva >= UTOP || (ROUNDDOWN(srcva, PGSIZE) != srcva))
+		return -E_INVAL;
+
+	if ((uintptr_t)dstva >= UTOP || (ROUNDDOWN(dstva, PGSIZE) != dstva))
+		return -E_INVAL;
+
+	if ((perm & ~PTE_SYSCALL) || !(perm & PTE_U) || !(perm & PTE_P))
+		return -E_INVAL;
+
+	pp = page_lookup(srcenv->env_pgdir, srcva, &pte);
+	if (pp == NULL)
+		return -E_INVAL;
+
+	if ((perm & PTE_W) && !(*pte & PTE_W))
+		return -E_INVAL;
+
+	errnum = page_insert(dstenv->env_pgdir, pp, dstva, perm);
+	if (errnum < 0)
+		return errnum;
+
+	return 0;
 }
 
 // Unmap the page of memory at 'va' in the address space of 'envid'.
@@ -200,7 +294,19 @@ sys_page_unmap(envid_t envid, void *va)
 	// Hint: This function is a wrapper around page_remove().
 
 	// LAB 4: Your code here.
-	panic("sys_page_unmap not implemented");
+
+	int errnum = 0;
+	struct Env *e;
+
+	errnum = envid2env(envid, &e, 1);
+	if (errnum < 0)
+		return errnum;
+
+	if ((uintptr_t)va >= UTOP || (ROUNDDOWN(va, PGSIZE) != va))
+		return -E_INVAL;
+
+	page_remove(e->env_pgdir, va);
+	return 0;
 }
 
 // Try to send 'value' to the target env 'envid'.
@@ -285,6 +391,19 @@ syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
 		return sys_getenvid();
 	case SYS_env_destroy:
 		return sys_env_destroy(a1);
+	case SYS_yield:
+		sys_yield();
+		return 0;
+	case SYS_exofork:
+		return sys_exofork();
+	case SYS_env_set_status:
+		return sys_env_set_status(a1, a2);
+	case SYS_page_alloc:
+		return sys_page_alloc(a1, (void *)a2, a3);
+	case SYS_page_map:
+		return sys_page_map(a1, (void *)a2, a3, (void *)a4, a5);
+	case SYS_page_unmap:
+		return sys_page_unmap(a1, (void *)a2);
 	default:
 		return -E_INVAL;
 	}

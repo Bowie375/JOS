@@ -119,10 +119,13 @@ env_init(void)
 {
 	// Set up envs array
 	// LAB 3: Your code here.
-	for (int i = 0; i < NENV; ++i) {
+	envs[NENV - 1].env_status = ENV_FREE;
+	envs[NENV - 1].env_id = 0;
+	envs[NENV - 1].env_link = NULL;
+	for (int i = NENV - 2; i >= 0; --i) {
 		envs[i].env_status = ENV_FREE;
 		envs[i].env_id = 0;
-		envs[i].env_link = &envs[(i+1) % NENV];
+		envs[i].env_link = &envs[i+1];
 	}
 	env_free_list = &envs[0];
 
@@ -417,6 +420,7 @@ env_create(uint8_t *binary, enum EnvType type)
 	load_icode(e, binary);
 
 	e->env_type = type;
+	e->env_link = NULL;
 }
 
 //
@@ -547,14 +551,17 @@ env_run(struct Env *e)
 	//	e->env_tf to sensible values.
 
 	// LAB 3: Your code here.
-	if (curenv && curenv->env_status == ENV_RUNNING) {
-		curenv->env_status = ENV_RUNNABLE;
+	struct Env *cur = curenv;
+
+	if (cur && cur->env_status == ENV_RUNNING) {
+		cur->env_status = ENV_RUNNABLE;
 	}
+
 	curenv = e;
 	e->env_status = ENV_RUNNING;
 	e->env_runs++;
-	lcr3(PADDR(e->env_pgdir));
 
+	lcr3(PADDR(e->env_pgdir));
 	unlock_kernel();
 	env_pop_tf(&e->env_tf);
 }
