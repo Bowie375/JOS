@@ -91,11 +91,6 @@ _alltraps:
 	pushl %ds
 	pushl %es
 
-    # movw %ds, %ax
-    # pushl %eax
-    # movw %es, %ax
-    # pushl %eax
-
 	# Save registers
 	pushal
 
