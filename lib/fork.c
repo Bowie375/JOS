@@ -81,19 +81,11 @@ duppage(envid_t envid, unsigned pn)
 	// LAB 4: Your code here.
 	extern volatile pte_t uvpt[];
 	extern volatile pte_t uvpd[];
-	
-	if (va == (UXSTACKTOP - PGSIZE))
-		return 0;
 
-	//cprintf("--- duppage: %x, %x\n", pn, uvpd[PDX(va)]);
-	if (uvpd[PDX(va)] && (uvpd[PDX(va)] & PTE_P)){
-		//cprintf("    here 0\n");
+	if (uvpd[PDX(va)] && (uvpd[PDX(va)] & PTE_P))
 		pte = uvpt[pn];
-		//cprintf("    here 1\n");
-	}
 	else
 		return 0;
-	//cprintf("    duppage: %d, %x, %x\n", pn, uvpd[PDX(va)], pte);
 
 	if (!pte || !((uintptr_t)pte & PTE_P)) // The pagetable is not present
 		return 0;
@@ -160,21 +152,34 @@ fork(void)
 
 	envid = sys_exofork();
 	if (envid < 0)
-		panic("sys_exofork: %e", envid);
+		panic("fork: sys_exofork: %e", envid);
 	if (envid == 0) {
 		// Child.
 		thisenv = &envs[ENVX(sys_getenvid())];
-		set_pgfault_handler(pgfault);
 		return 0;
 	}
 
-	for (addr = (uint8_t *)0; (uintptr_t)addr < UTOP; addr += PGSIZE) {
-		duppage(envid, (uintptr_t)addr / PGSIZE);
+	for (addr = 0; (uintptr_t)addr < UTOP; addr += PGSIZE) {
+		if ((uintptr_t)addr == (UXSTACKTOP - PGSIZE))
+			continue;
+
+		if ((r = duppage(envid, PGNUM(addr))) < 0)
+			panic("fork: duppage: %e", r);
 	}
+
+    // Allocate new exception stack for child
+    if ((r = sys_page_alloc(envid,
+        (void *)(UXSTACKTOP - PGSIZE),
+        PTE_U | PTE_W | PTE_P)) < 0)
+        panic("fork: sys_page_alloc (child exception stack): %e", r);
+
+    // Copy parent's pgfault upcall to child
+    if ((r = sys_env_set_pgfault_upcall(envid, thisenv->env_pgfault_upcall)) < 0)
+        panic("fork: sys_env_set_pgfault_upcall: %e", r);
 
 	// Start the child environment running
 	if ((r = sys_env_set_status(envid, ENV_RUNNABLE)) < 0)
-		panic("sys_env_set_status: %e", r);
+		panic("fork: sys_env_set_status: %e", r);
 
 	return envid;
 }
@@ -183,6 +188,83 @@ fork(void)
 int
 sfork(void)
 {
-	panic("sfork not implemented");
-	return -E_INVAL;
+	envid_t envid;
+	uint8_t *addr;
+	int r, perm;
+	pte_t pte = 0;
+
+	extern volatile pte_t uvpt[];
+	extern volatile pte_t uvpd[];
+
+	set_pgfault_handler(pgfault);
+
+	envid = sys_exofork();
+	if (envid < 0)
+		panic("sfork: sys_exofork: %e", envid);
+	if (envid == 0) {
+		// Child.
+		// thisenv = &envs[ENVX(sys_getenvid())];
+		return 0;
+	}
+
+	for (addr = 0; (uintptr_t)addr < UTOP; addr += PGSIZE) {
+		if ((uintptr_t)addr == (UXSTACKTOP - PGSIZE))
+			continue;
+
+		if ((uintptr_t)addr == (USTACKTOP - PGSIZE)) {
+			if ((r = duppage(envid, PGNUM(addr))) < 0)
+				panic("sfork: duppage: %e", r);
+			continue;
+		}
+	
+		// directly share the page
+		if (uvpd[PDX(addr)] && (uvpd[PDX(addr)] & PTE_P))
+			pte = uvpt[PGNUM(addr)];
+		else
+			continue;
+
+		if (!pte || !((uintptr_t)pte & PTE_P)) // The pagetable is not present
+			continue;
+
+		perm = pte & PTE_SYSCALL;
+
+		if (pte & PTE_SHARE) {
+			cprintf("sfork: share page %x\n", addr);
+			if ((r = sys_page_map(0, (void *)addr, envid, (void *)addr, perm)) < 0)
+				panic("sfork: sys_page_map: %e", r);
+			continue;
+		}
+
+		if ((pte & PTE_COW) && !(pte & PTE_W)) {
+            perm |= PTE_W;            // give write permission
+            perm &= ~PTE_COW;         // clear COW in perms we will set
+        }
+
+        // Map into child first.
+        if ((r = sys_page_map(0, (void *)addr, envid, (void *)addr, perm)) < 0)
+            panic("sfork: map->child failed: %e", r);
+
+        if (((pte & PTE_COW) && !(pte & PTE_W)) || ((pte & PTE_COW) && (perm & PTE_W))) {
+            if ((r = sys_page_map(0, (void *)addr, 0, (void *)addr, perm)) < 0)
+                panic("sfork: remap parent failed: %e", r);
+        }
+
+	}
+
+    // Allocate new exception stack for child
+    if ((r = sys_page_alloc(envid,
+        (void *)(UXSTACKTOP - PGSIZE),
+        PTE_U | PTE_W | PTE_P)) < 0)
+        panic("sfork: sys_page_alloc (child exception stack): %e", r);
+
+    // Copy parent's pgfault upcall to child
+    if ((r = sys_env_set_pgfault_upcall(envid, thisenv->env_pgfault_upcall)) < 0)
+        panic("sfork: sys_env_set_pgfault_upcall: %e", r);
+
+	// Start the child environment running
+	if ((r = sys_env_set_status(envid, ENV_RUNNABLE)) < 0)
+		panic("sfork: sys_env_set_status: %e", r);
+
+	return envid;
+
 }
