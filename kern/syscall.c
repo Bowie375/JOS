@@ -276,11 +276,19 @@ sys_page_map(envid_t srcenvid, void *srcva,
 	// LAB 4: Your code here.
 
 	int errnum = 0;
-	struct Env *srcenv, *dstenv;
+	struct Env *srcenv, *dstenv, *e;
 	struct PageInfo *pp;
 	pte_t *pte;
 
-	errnum = envid2env(srcenvid, &srcenv, 1);
+	if ((errnum = envid2env(srcenvid, &e, 0)) < 0)
+		return errnum;
+	if (e->env_type == ENV_TYPE_FS) {
+		// should check if the user has permission to map pages in FS, but we don't need this yet
+		srcenv = e;
+	} else {
+		errnum = envid2env(srcenvid, &srcenv, 1);
+	}
+
 	if (errnum < 0)
 		return errnum;
 

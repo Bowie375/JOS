@@ -7,6 +7,8 @@
 
 // Helper functions for spawn.
 static int init_stack(envid_t child, const char **argv, uintptr_t *init_esp);
+static int map_read_segment(envid_t child, uintptr_t va, size_t memsz,
+			    int fd, size_t filesz, off_t fileoffset, int perm);
 static int map_segment(envid_t child, uintptr_t va, size_t memsz,
 		       int fd, size_t filesz, off_t fileoffset, int perm);
 static int copy_shared_pages(envid_t child);
@@ -116,11 +118,17 @@ spawn(const char *prog, const char **argv)
 		if (ph->p_type != ELF_PROG_LOAD)
 			continue;
 		perm = PTE_P | PTE_U;
-		if (ph->p_flags & ELF_PROG_FLAG_WRITE)
+		if (ph->p_flags & ELF_PROG_FLAG_WRITE) {
 			perm |= PTE_W;
-		if ((r = map_segment(child, ph->p_va, ph->p_memsz,
-				     fd, ph->p_filesz, ph->p_offset, perm)) < 0)
-			goto error;
+			if ((r = map_segment(child, ph->p_va, ph->p_memsz,
+					     fd, ph->p_filesz, ph->p_offset, perm)) < 0)
+				goto error;
+		} else {
+			// read-only text segment
+			if ((r = map_read_segment(child, ph->p_va, ph->p_memsz,
+					     fd, ph->p_filesz, ph->p_offset, perm)) < 0)
+				goto error;
+		}
 	}
 	close(fd);
 	fd = -1;
@@ -258,6 +266,41 @@ init_stack(envid_t child, const char **argv, uintptr_t *init_esp)
 error:
 	sys_page_unmap(0, UTEMP);
 	return r;
+}
+
+static int
+map_read_segment(envid_t child, uintptr_t va, size_t memsz,
+	int fd, size_t filesz, off_t fileoffset, int perm)
+{
+	int i, r;
+	static envid_t fsenv;
+	if (fsenv == 0)
+		fsenv = ipc_find_env(ENV_TYPE_FS);
+
+	if ((i = PGOFF(va))) {
+		va -= i;
+		memsz += i;
+		filesz += i;
+		fileoffset -= i;
+	}
+
+	for (i = 0; i < memsz; i += PGSIZE) {
+		if (i >= filesz) {
+			// allocate a blank page
+			if ((r = sys_page_alloc(child, (void*) (va + i), perm)) < 0)
+				return r;
+		} else {
+			// from file
+			if ((r = seek(fd, fileoffset + i)) < 0)
+				return r;
+			if ((r = read_map(fd, MIN(PGSIZE, filesz-i))) < 0)
+				return r;
+			if ((r = sys_page_map(fsenv, (void *)r, child, (void*) (va + i), perm)) < 0)
+				panic("spawn: sys_page_map data: %e", r);
+		}
+	}
+
+	return 0;
 }
 
 static int

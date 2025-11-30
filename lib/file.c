@@ -30,6 +30,7 @@ fsipc(unsigned type, void *dstva)
 
 static int devfile_flush(struct Fd *fd);
 static ssize_t devfile_read(struct Fd *fd, void *buf, size_t n);
+static ssize_t devfile_read_map(struct Fd *fd, size_t n);
 static ssize_t devfile_write(struct Fd *fd, const void *buf, size_t n);
 static int devfile_stat(struct Fd *fd, struct Stat *stat);
 static int devfile_trunc(struct Fd *fd, off_t newsize);
@@ -39,6 +40,7 @@ struct Dev devfile =
 	.dev_id =	'f',
 	.dev_name =	"file",
 	.dev_read =	devfile_read,
+	.dev_read_map = devfile_read_map,
 	.dev_close =	devfile_flush,
 	.dev_stat =	devfile_stat,
 	.dev_write =	devfile_write,
@@ -127,6 +129,19 @@ devfile_read(struct Fd *fd, void *buf, size_t n)
 	return r;
 }
 
+static ssize_t
+devfile_read_map(struct Fd *fd, size_t n)
+{
+	int r;
+
+	fsipcbuf.read.req_fileid = fd->fd_file.id;
+	fsipcbuf.read.req_n = n;
+	if ((r = fsipc(FSREQ_READ_MAP, NULL)) < 0)
+		return r;
+	assert(r <= 0xD0000000);
+	assert(r >= 0x10000000);
+	return r;	
+}
 
 // Write at most 'n' bytes from 'buf' to 'fd' at the current seek position.
 //

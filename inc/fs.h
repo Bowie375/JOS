@@ -65,6 +65,7 @@ enum {
 	FSREQ_SET_SIZE,
 	// Read returns a Fsret_read on the request page
 	FSREQ_READ,
+	FSREQ_READ_MAP,
 	FSREQ_WRITE,
 	// Stat returns a Fsret_stat on the request page
 	FSREQ_STAT,

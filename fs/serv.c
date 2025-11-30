@@ -235,6 +235,39 @@ serve_read(envid_t envid, union Fsipc *ipc)
 	return r;
 }
 
+int
+serve_read_map(envid_t envid, union Fsipc *ipc)
+{
+	struct Fsreq_read *req = &ipc->read;
+	struct Fsret_read *ret = &ipc->readRet;
+	struct OpenFile *o;
+	int r;
+	size_t count;
+	char * blk, blk0;
+
+	if (debug)
+		cprintf("serve_read_map %08x %08x %08x\n", envid, req->req_fileid, req->req_n);
+
+	assert(req->req_n <= PGSIZE);
+
+	if ((r = openfile_lookup(envid, req->req_fileid, &o)) < 0)
+		return r;
+
+	count = MIN(req->req_n, o->o_file->f_size - o->o_fd->fd_offset);
+	if (count > PGSIZE) {
+		cprintf("serve_read: req_n too large\n");
+		return -E_INVAL;
+	} else if (count < 0) {
+		cprintf("serve_read: req_n is negative\n");
+		return -E_INVAL;
+	}
+
+	if ((r = file_get_block(o->o_file, o->o_fd->fd_offset / BLKSIZE, &blk)) < 0)
+		return r;
+	memcpy(blk, blk, 1); // make sure the block is mapped
+
+	return (int)blk;
+}
 
 // Write req->req_n bytes from req->req_buf to req_fileid, starting at
 // the current seek position, and update the seek position
@@ -315,6 +348,7 @@ fshandler handlers[] = {
 	// Open is handled specially because it passes pages
 	/* [FSREQ_OPEN] =	(fshandler)serve_open, */
 	[FSREQ_READ] =		serve_read,
+	[FSREQ_READ_MAP] =  serve_read_map,
 	[FSREQ_STAT] =		serve_stat,
 	[FSREQ_FLUSH] =		(fshandler)serve_flush,
 	[FSREQ_WRITE] =		(fshandler)serve_write,
