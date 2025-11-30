@@ -302,6 +302,31 @@ static int
 copy_shared_pages(envid_t child)
 {
 	// LAB 5: Your code here.
+
+	uint8_t *addr;
+	int r, perm;
+	pte_t pte = 0;
+
+	extern volatile pte_t uvpt[];
+	extern volatile pte_t uvpd[];
+
+	for (addr = 0; (uintptr_t)addr < UTOP; addr += PGSIZE) {
+		if (uvpd[PDX(addr)] && (uvpd[PDX(addr)] & PTE_P))
+			pte = uvpt[PGNUM(addr)];
+		else
+			continue;
+
+		if (!pte || !((uintptr_t)pte & PTE_P)) // The pagetable is not present
+			continue;
+
+		// Shareable page
+		if (pte & PTE_SHARE) {
+			perm = pte & PTE_SYSCALL;
+			if ((r = sys_page_map(0, (void *)addr, child, (void *)addr, perm)) < 0)
+				return r;
+		}
+	}
+
 	return 0;
 }
 
