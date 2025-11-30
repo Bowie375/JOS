@@ -235,6 +235,9 @@ serve_read(envid_t envid, union Fsipc *ipc)
 	return r;
 }
 
+// Check the current seek position in req->req_fileid.  Return the
+// virtual address of the corresponding block, or < 0 on error.
+// This function is used to solve a challenge problem in the lab.
 int
 serve_read_map(envid_t envid, union Fsipc *ipc)
 {
