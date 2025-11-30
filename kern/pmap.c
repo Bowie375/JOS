@@ -498,8 +498,8 @@ page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 	if (pp->pp_ref == 1) {
 		tmp_pp = page_free_list;
 		if (tmp_pp == pp) {
-			pp->pp_link = NULL;
 			page_free_list = pp->pp_link;
+			pp->pp_link = NULL;
 			return 0;
 		}
 
